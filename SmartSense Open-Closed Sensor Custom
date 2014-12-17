@@ -240,10 +240,10 @@ private Map getTemperatureResult(value) {
 	if (tempOffset) {
 		def offset = tempOffset as int
 //		def v = value as int
-		def v = value
-		value = v + offset
+		Float v = value as Float
+		value = (v + offset) as Float
 	}
-    def nv = Math.round( value * 10) / 10	// Need at least one decimal point for Celsius
+    def nv = Math.round( (value as Float) * 10.0 ) / 10	// Need at least one decimal point
     value = nv
 	def descriptionText = "${linkText} was ${value}°${temperatureScale}"
 	return [
