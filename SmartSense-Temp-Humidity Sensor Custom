@@ -23,6 +23,7 @@ metadata {
 		capability "Refresh"
 		capability "Temperature Measurement"
 		capability "Relative Humidity Measurement"
+        capability "Polling"
  
  
 		fingerprint endpointId: "01", inClusters: "0001,0003,0020,0402,0B05,FC45", outClusters: "0019,0003"
@@ -68,14 +69,24 @@ metadata {
         standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat") {
 			state "default", action:"refresh.refresh", icon:"st.secondary.refresh"
 		}
+        
+        
+		standardTile("configure", "device.configure", inactiveLabel: false, decoration: "flat") {
+			state "configure", label:'', action:"configuration.configure", icon:"st.secondary.configure"
+		}
  
 		main "temperature", "humidity"
-		details(["temperature","humidity","battery","refresh"])
+		details(["temperature","humidity","battery","configure","refresh"])
 	}
 }
  
 def parse(String description) {
-	log.debug "description: $description"
+
+	if (description?.startsWith('temperature: ')) {
+    	log.trace "description: $description"
+    } else {
+		log.debug "description: $description"
+    }
 
 	Map map = [:]
 	if (description?.startsWith('catchall:')) {
@@ -146,7 +157,11 @@ private Map parseReportAttributeMessage(String description) {
 	}
 	else if (descMap.cluster == "FC45" && descMap.attrId == "0000") {
 		def value = getReportAttributeHumidity(descMap.value)
-		resultMap = getHumidityResult(value)
+        if ( value != null ) {
+			resultMap = getHumidityResult(value)
+        } else {
+        	log.warn "Invalid humidity: null"
+        }
 	}
  
 	return resultMap
@@ -170,15 +185,17 @@ private Map parseCustomMessage(String description) {
 	Map resultMap = [:]
 	if (description?.startsWith('temperature: ')) {
 //		Float value = zigbee.parseHATemperatureValue(description, "temperature: ", getTemperatureScale()).toFloat()
+//		def value = zigbee.parseHATemperatureValue(description, "temperature: ", getTemperatureScale()).toFloat()
 		def value = (description - "temperature: ").trim()
-        if (value.isNumber()) {
+//        log.debug "TEMP ${value}"
+        if (value.isNumber() && (value.toString() != "0.00"))  {
         	if (getTemperatureScale() == "F") {
             	value = celsiusToFahrenheit(value.toFloat()) as Float
 			}
 			resultMap = getTemperatureResult(value)
             return resultMap
         } else {
-        	log.error "invalid temperature: ${temp}"
+        	log.warn "invalid temperature: ${value}"
         }
 	}
 	else if (description?.startsWith('humidity: ')) {
@@ -187,7 +204,7 @@ private Map parseCustomMessage(String description) {
 			def value = Math.round(new BigDecimal(pct)).toString()
 			resultMap = getHumidityResult(value)
 		} else {
-			log.error "invalid humidity: ${pct}"
+			log.warn "invalid humidity: ${pct}"
 		}
 	}
 	return resultMap
@@ -221,7 +238,7 @@ private Map getBatteryResult(rawValue) {
     	def maxVolts = 3.0
 		def pct = (volts - minVolts) / (maxVolts - minVolts)
 		result.value = Math.min(100, (int) pct * 100)
-		result.descriptionText = "${linkText} battery was ${result.value}%"
+		result.descriptionText = "${linkText} Battery is ${result.value}%"
 	}
 
 	return result
@@ -230,6 +247,7 @@ private Map getBatteryResult(rawValue) {
 private Map getTemperatureResult(value) {
 	log.debug "TEMP ${value}°"
 	def linkText = getLinkText(device)
+    def temperatureScale = getTemperatureScale()
 	if (tempOffset) {
 		def offset = tempOffset as int
 //		def v = value as int
@@ -238,20 +256,36 @@ private Map getTemperatureResult(value) {
 	}
     Float nv = Math.round( (value as Float) * 10.0 ) / 10	// Need at least one decimal point
     value = nv as Float
-	def descriptionText = "${linkText} was ${value}°${temperatureScale}"
+	def descriptionText = "${linkText} Temperature is ${value}°${temperatureScale}"
 	return [
 		name: 'temperature',
 		value: value,
+        unit: temperatureScale,
 		descriptionText: descriptionText
 	]
 }
 
 private Map getHumidityResult(value) {
 	log.debug 'Humidity'
+	def linkText = device.displayName
+    def descriptionText = "${linkText} Humidity is ${value}%"
 	return [
 		name: 'humidity',
 		value: value,
-		unit: '%'
+		unit: '%',
+        descriptionText: descriptionText
+	]
+}
+
+def poll() 
+{
+	log.debug "poll for temperature & humidity only"
+	[
+		
+		"zcl mfg-code 0xC2DF", "delay 1000",
+		"zcl global read 0xFC45 0", "delay 1000",						/* Humidity */
+		"send 0x${device.deviceNetworkId} 1 1", "delay 1000",
+        "st rattr 0x${device.deviceNetworkId} 1 0x402 0"				/* Temperature */
 	]
 }
 
